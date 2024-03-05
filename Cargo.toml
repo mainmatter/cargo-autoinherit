@@ -1,0 +1,13 @@
+[package]
+name = "cargo-autoinherit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.80"
+guppy = "0.17.5"
+fs-err = "2.11.0"
+cargo-manifest = "0.13.0"
+toml = "0.8.10"
+semver = "1.0.22"
+toml_edit = "0.22.6"
