@@ -1,0 +1,19 @@
+[package]
+name = "cargo-autoinherit"
+version = "0.1.0"
+edition = "2021"
+authors = ["Luca Palmieri <rust@lpalmieri.com>"]
+description = "A cargo sub-command to leverage dependency inheritance wherever possible"
+keywords = ["cargo", "workspace", "inheritance", "dependencies"]
+categories = ["development-tools::cargo-plugins", "command-line-utilities"]
+repository = "https://github.com/mainmatter/cargo-autoinherit"
+license = "Apache-2.0 OR MIT"
+
+[dependencies]
+anyhow = "1.0.80"
+guppy = "0.17.5"
+fs-err = "2.11.0"
+cargo-manifest = "0.13.0"
+toml = "0.8.10"
+semver = "1.0.22"
+toml_edit = "0.22.6"
