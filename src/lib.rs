@@ -71,7 +71,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
     }
 
     // Add new "shared" dependencies to `[workspace.dependencies]`
-    let mut workspace_toml: toml_edit::Document = {
+    let mut workspace_toml: toml_edit::DocumentMut = {
         let contents = fs_err::read_to_string(workspace_root.join("Cargo.toml").as_std_path())
             .context("Failed to read root manifest")?;
         contents.parse().context("Failed to parse root manifest")?
@@ -89,7 +89,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         .expect("Failed to find `[workspace.dependencies]` table in root manifest.");
     let mut was_modified = false;
     for (package_name, source) in &package_name2inherited_source {
-        workspace_deps.insert(package_name, dep2toml_item(&shared2dep(&source)));
+        workspace_deps.insert(package_name, dep2toml_item(&shared2dep(source)));
         was_modified = true;
     }
     if was_modified {
@@ -107,7 +107,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
             .context("Failed to read root manifest")?;
         let manifest: Manifest =
             toml::from_str(&manifest_contents).context("Failed to parse root manifest")?;
-        let mut manifest_toml: toml_edit::Document = manifest_contents
+        let mut manifest_toml: toml_edit::DocumentMut = manifest_contents
             .parse()
             .context("Failed to parse root manifest")?;
         let mut was_modified = false;
@@ -269,7 +269,7 @@ fn dep2shared_dep(dep: &Dependency) -> Option<SharedDependency> {
                     rev: d.rev.to_owned(),
                 });
             } else if let Some(version) = &d.version {
-                if !d.registry.is_some() && !d.registry_index.is_some() {
+                if d.registry.is_none() && d.registry_index.is_none() {
                     // We ignore custom registries for now.
                     let version_req =
                         VersionReq::parse(version).expect("Failed to parse version requirement");
