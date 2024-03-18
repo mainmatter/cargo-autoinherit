@@ -41,8 +41,11 @@ the `[workspace.dependencies]` section of the root `Cargo.toml`. It also takes c
 
 ## Installation
 
+You can find prebuilt binaries on the [Releases page](https://github.com/mainmatter/cargo-autoinherit/releases).  
+Alternatively, you can build from source:
+
 ```bash
-cargo install cargo-autoinherit
+cargo install --locked cargo-autoinherit
 ```
 
 ## Usage
