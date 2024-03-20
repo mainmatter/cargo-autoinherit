@@ -123,7 +123,7 @@ fn try_merge(first: &VersionReq, second: &VersionReq) -> Option<VersionReq> {
 /// A `VersionReq` is "a simple caret" if it contains a single comparator with a `^` prefix
 /// and there are no pre-release or build identifiers.
 fn as_simple_caret(req: &VersionReq) -> Option<&Comparator> {
-    if req.comparators.len() > 1 {
+    if req.comparators.is_empty() {
         return None;
     }
     let comp = &req.comparators[0];
