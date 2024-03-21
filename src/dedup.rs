@@ -66,9 +66,17 @@ impl MinimalVersionSet {
 
 /// Tries to merge two version requirements into a single version requirement.
 ///
-/// We only handle the case where both version requirements are simple carets—e.g.
-/// `^1.2` and `^1.3.1`. In this case, we can merge them into `^1.3.1`.
+/// We handle:
+///
+/// - The case where both version requirements are the same.
+/// - The case where one version requirement is a wildcard and the other isn't.
+/// - The case where both version requirements are simple carets—e.g. `^1.2` and `^1.3.1`.
+///   In this case, we can merge them into `^1.3.1`.
 fn try_merge(first: &VersionReq, second: &VersionReq) -> Option<VersionReq> {
+    if first == second {
+        return Some(first.clone());
+    }
+
     if first == &VersionReq::STAR && second != &VersionReq::STAR {
         // First is wildcard, second isn't
         return Some(second.clone());
@@ -133,14 +141,14 @@ fn try_merge(first: &VersionReq, second: &VersionReq) -> Option<VersionReq> {
 /// A `VersionReq` is "a simple caret" if it contains a single comparator with a `^` prefix
 /// and there are no pre-release or build identifiers.
 fn as_simple_caret(req: &VersionReq) -> Option<&Comparator> {
-    if req.comparators.len() > 1 {
+    if req.comparators.len() != 1 {
         return None;
     }
     let comp = &req.comparators[0];
-    if comp.op != semver::Op::Caret {
+    if comp.op != Op::Caret {
         return None;
     }
-    if comp.pre != semver::Prerelease::EMPTY {
+    if comp.pre != Prerelease::EMPTY {
         return None;
     }
     Some(comp)
