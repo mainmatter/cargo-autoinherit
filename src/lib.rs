@@ -4,7 +4,7 @@ use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest};
 use guppy::VersionReq;
 use std::collections::BTreeMap;
 use std::fmt::Formatter;
-use toml_edit::Array;
+use toml_edit::{Array, Key};
 
 mod dedup;
 
@@ -86,7 +86,11 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         .expect("Failed to find `[workspace.dependencies]` table in root manifest.");
     let mut was_modified = false;
     for (package_name, source) in &package_name2inherited_source {
-        workspace_deps.insert(package_name, dep2toml_item(&shared2dep(source)));
+        insert_preserving_decor(
+            workspace_deps,
+            package_name,
+            dep2toml_item(&shared2dep(source)),
+        );
         was_modified = true;
     }
     if was_modified {
@@ -168,7 +172,8 @@ fn inherit_deps(
             Dependency::Simple(_) => {
                 let mut inherited = toml_edit::InlineTable::new();
                 inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
-                toml_deps.insert(name, toml_edit::Item::Value(inherited.into()));
+
+                insert_preserving_decor(toml_deps, name, toml_edit::Item::Value(inherited.into()));
                 *was_modified = true;
             }
             Dependency::Inherited(_) => {
@@ -186,11 +191,43 @@ fn inherit_deps(
                 if let Some(optional) = details.optional {
                     inherited.insert("optional", toml_edit::value(optional).into_value().unwrap());
                 }
-                toml_deps.insert(name, toml_edit::Item::Value(inherited.into()));
+
+                insert_preserving_decor(toml_deps, name, toml_edit::Item::Value(inherited.into()));
                 *was_modified = true;
             }
         }
     }
+}
+
+fn insert_preserving_decor(table: &mut toml_edit::Table, key: &str, mut value: toml_edit::Item) {
+    fn get_decor(item: &toml_edit::Item) -> Option<toml_edit::Decor> {
+        match item {
+            toml_edit::Item::Value(v) => Some(v.decor().clone()),
+            toml_edit::Item::Table(t) => Some(t.decor().clone()),
+            _ => None,
+        }
+    }
+
+    fn set_decor(item: &mut toml_edit::Item, decor: toml_edit::Decor) {
+        match item {
+            toml_edit::Item::Value(v) => {
+                *v.decor_mut() = decor;
+            }
+            toml_edit::Item::Table(t) => {
+                *t.decor_mut() = decor;
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    let mut new_key = Key::new(key);
+    if let Some((existing_key, existing_value)) = table.get_key_value(key) {
+        new_key = new_key.with_leaf_decor(existing_key.leaf_decor().to_owned());
+        if let Some(decor) = get_decor(existing_value) {
+            set_decor(&mut value, decor);
+        }
+    }
+    table.insert_formatted(&new_key, value);
 }
 
 fn process_deps(deps: &DepsSet, package_name2specs: &mut BTreeMap<String, MinimalVersionSet>) {
