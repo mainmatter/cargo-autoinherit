@@ -2,7 +2,7 @@ use crate::dedup::MinimalVersionSet;
 use anyhow::Context;
 use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest};
 use guppy::VersionReq;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use toml_edit::Array;
 
@@ -30,11 +30,8 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
     };
 
     let mut package_name2specs: BTreeMap<String, MinimalVersionSet> = BTreeMap::new();
-
-    let mut existing_workspace_deps = BTreeSet::new();
     if let Some(deps) = &workspace.dependencies {
         process_deps(deps, &mut package_name2specs);
-        existing_workspace_deps.extend(deps.keys().cloned());
     }
 
     for member_id in graph.workspace().member_ids() {
