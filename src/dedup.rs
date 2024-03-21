@@ -69,6 +69,16 @@ impl MinimalVersionSet {
 /// We only handle the case where both version requirements are simple carets—e.g.
 /// `^1.2` and `^1.3.1`. In this case, we can merge them into `^1.3.1`.
 fn try_merge(first: &VersionReq, second: &VersionReq) -> Option<VersionReq> {
+    if first == &VersionReq::STAR && second != &VersionReq::STAR {
+        // First is wildcard, second isn't
+        return Some(second.clone());
+    }
+
+    if first != &VersionReq::STAR && second == &VersionReq::STAR {
+        // Second is wildcard, first isn't
+        return Some(first.clone());
+    }
+
     let first = as_simple_caret(first)?;
     let second = as_simple_caret(second)?;
     if first.major != second.major {
