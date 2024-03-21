@@ -29,7 +29,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         )
     };
 
-    let mut package_name2specs: BTreeMap<String, MinimalVersionSet> = BTreeMap::new();
+    let mut package_name2specs: BTreeMap<String, Action> = BTreeMap::new();
     if let Some(deps) = &workspace.dependencies {
         process_deps(deps, &mut package_name2specs);
     }
@@ -54,7 +54,12 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
     }
 
     let mut package_name2inherited_source: BTreeMap<String, SharedDependency> = BTreeMap::new();
-    'outer: for (package_name, specs) in package_name2specs {
+    'outer: for (package_name, action) in package_name2specs {
+        let Action::TryInherit(specs) = action else {
+            eprintln!("`{package_name}` won't be auto-inherited because it appears at least once from a source type \
+                that we currently don't support (e.g. private registry, path dependency).");
+            continue;
+        };
         if specs.len() > 1 {
             eprintln!("`{package_name}` won't be auto-inherited because there are multiple sources for it:");
             for spec in specs.into_iter() {
@@ -157,6 +162,17 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+enum Action {
+    TryInherit(MinimalVersionSet),
+    Skip,
+}
+
+impl Default for Action {
+    fn default() -> Self {
+        Action::TryInherit(MinimalVersionSet::default())
+    }
+}
+
 fn inherit_deps(
     deps: &DepsSet,
     toml_deps: &mut toml_edit::Table,
@@ -230,11 +246,19 @@ fn insert_preserving_decor(table: &mut toml_edit::Table, key: &str, mut value: t
     table.insert_formatted(&new_key, value);
 }
 
-fn process_deps(deps: &DepsSet, package_name2specs: &mut BTreeMap<String, MinimalVersionSet>) {
+fn process_deps(deps: &DepsSet, package_name2specs: &mut BTreeMap<String, Action>) {
     for (name, details) in deps {
-        if let Some(source) = dep2shared_dep(details) {
-            let set = package_name2specs.entry(name.clone()).or_default();
-            set.insert(source);
+        match dep2shared_dep(details) {
+            SourceType::Shareable(source) => {
+                let action = package_name2specs.entry(name.clone()).or_default();
+                if let Action::TryInherit(set) = action {
+                    set.insert(source);
+                }
+            }
+            SourceType::Inherited => {}
+            SourceType::MustBeSkipped => {
+                package_name2specs.insert(name.clone(), Action::Skip);
+            }
         }
     }
 }
@@ -282,19 +306,33 @@ impl std::fmt::Display for DependencySource {
     }
 }
 
-fn dep2shared_dep(dep: &Dependency) -> Option<SharedDependency> {
+enum SourceType {
+    Shareable(SharedDependency),
+    Inherited,
+    MustBeSkipped,
+}
+
+fn dep2shared_dep(dep: &Dependency) -> SourceType {
     match dep {
         Dependency::Simple(version) => {
             let version_req =
                 VersionReq::parse(version).expect("Failed to parse version requirement");
-            Some(SharedDependency {
+            SourceType::Shareable(SharedDependency {
                 default_features: true,
                 source: DependencySource::Version(version_req),
             })
         }
-        Dependency::Inherited(_) => None,
+        Dependency::Inherited(_) => SourceType::Inherited,
         Dependency::Detailed(d) => {
             let mut source = None;
+            // We ignore custom registries for now.
+            if d.registry.is_some() || d.registry_index.is_some() {
+                return SourceType::MustBeSkipped;
+            }
+            // We ignore path deps for now.
+            if d.path.is_some() {
+                return SourceType::MustBeSkipped;
+            }
             if let Some(git) = &d.git {
                 source = Some(DependencySource::Git {
                     git: git.to_owned(),
@@ -303,18 +341,17 @@ fn dep2shared_dep(dep: &Dependency) -> Option<SharedDependency> {
                     rev: d.rev.to_owned(),
                 });
             } else if let Some(version) = &d.version {
-                if d.registry.is_none() && d.registry_index.is_none() {
-                    // We ignore custom registries for now.
-                    let version_req =
-                        VersionReq::parse(version).expect("Failed to parse version requirement");
-                    source = Some(DependencySource::Version(version_req));
-                }
+                let version_req =
+                    VersionReq::parse(version).expect("Failed to parse version requirement");
+                source = Some(DependencySource::Version(version_req));
             }
-            // We ignore path deps for now.
-            source.map(|source| SharedDependency {
-                default_features: d.default_features.unwrap_or(true),
-                source,
-            })
+            match source {
+                None => SourceType::MustBeSkipped,
+                Some(source) => SourceType::Shareable(SharedDependency {
+                    default_features: d.default_features.unwrap_or(true),
+                    source,
+                }),
+            }
         }
     }
 }
