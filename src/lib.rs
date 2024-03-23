@@ -4,6 +4,7 @@ use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest};
 use guppy::VersionReq;
 use std::collections::BTreeMap;
 use std::fmt::Formatter;
+use std::path::{Path, PathBuf};
 use toml_edit::{Array, Key};
 
 mod dedup;
@@ -16,6 +17,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         .build_graph()
         .context("Failed to build package graph")?;
     let workspace_root = graph.workspace().root();
+    let c_workspace_root = workspace_root.canonicalize()?;
     let mut root_manifest: Manifest = {
         let contents = fs_err::read_to_string(workspace_root.join("Cargo.toml").as_std_path())
             .context("Failed to read root manifest")?;
@@ -31,11 +33,13 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
 
     let mut package_name2specs: BTreeMap<String, Action> = BTreeMap::new();
     if let Some(deps) = &workspace.dependencies {
-        process_deps(deps, &mut package_name2specs);
+        process_deps(deps, &mut package_name2specs, &PathBuf::from("."));
     }
 
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
+        let mut dpath = PathBuf::from(package.manifest_path());
+        dpath.pop();
         assert!(package.in_workspace());
         let manifest: Manifest = {
             let contents = fs_err::read_to_string(package.manifest_path().as_std_path())
@@ -43,13 +47,13 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
             toml::from_str(&contents).context("Failed to parse root manifest")?
         };
         if let Some(deps) = &manifest.dependencies {
-            process_deps(deps, &mut package_name2specs);
+            process_deps(deps, &mut package_name2specs, &dpath);
         }
         if let Some(deps) = &manifest.dev_dependencies {
-            process_deps(deps, &mut package_name2specs);
+            process_deps(deps, &mut package_name2specs, &dpath);
         }
         if let Some(deps) = &manifest.build_dependencies {
-            process_deps(deps, &mut package_name2specs);
+            process_deps(deps, &mut package_name2specs, &dpath);
         }
     }
 
@@ -94,7 +98,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         insert_preserving_decor(
             workspace_deps,
             package_name,
-            dep2toml_item(&shared2dep(source)),
+            dep2toml_item(&shared2dep(source, &c_workspace_root)),
         );
         was_modified = true;
     }
@@ -246,9 +250,13 @@ fn insert_preserving_decor(table: &mut toml_edit::Table, key: &str, mut value: t
     table.insert_formatted(&new_key, value);
 }
 
-fn process_deps(deps: &DepsSet, package_name2specs: &mut BTreeMap<String, Action>) {
+fn process_deps(
+    deps: &DepsSet,
+    package_name2specs: &mut BTreeMap<String, Action>,
+    dep_base: &Path,
+) {
     for (name, details) in deps {
-        match dep2shared_dep(details) {
+        match dep2shared_dep(details, dep_base) {
             SourceType::Shareable(source) => {
                 let action = package_name2specs.entry(name.clone()).or_default();
                 if let Action::TryInherit(set) = action {
@@ -278,6 +286,7 @@ enum DependencySource {
         tag: Option<String>,
         rev: Option<String>,
     },
+    Path(PathBuf),
 }
 
 impl std::fmt::Display for DependencySource {
@@ -302,6 +311,9 @@ impl std::fmt::Display for DependencySource {
                 }
                 Ok(())
             }
+            DependencySource::Path(path) => {
+                write!(f, "path: {}", path.display())
+            }
         }
     }
 }
@@ -312,7 +324,8 @@ enum SourceType {
     MustBeSkipped,
 }
 
-fn dep2shared_dep(dep: &Dependency) -> SourceType {
+fn dep2shared_dep(dep: &Dependency, dep_base: &Path) -> SourceType {
+    use std::fs::canonicalize;
     match dep {
         Dependency::Simple(version) => {
             let version_req =
@@ -330,10 +343,17 @@ fn dep2shared_dep(dep: &Dependency) -> SourceType {
                 return SourceType::MustBeSkipped;
             }
             // We ignore path deps for now.
-            if d.path.is_some() {
-                return SourceType::MustBeSkipped;
-            }
-            if let Some(git) = &d.git {
+            if let Some(path) = &d.path {
+                let buf = PathBuf::from(path);
+                let buf = if buf.is_relative() {
+                    let mut r = PathBuf::from(dep_base);
+                    r.push(buf);
+                    r
+                } else {
+                    buf
+                };
+                source = Some(DependencySource::Path(canonicalize(buf).unwrap()));
+            } else if let Some(git) = &d.git {
                 source = Some(DependencySource::Git {
                     git: git.to_owned(),
                     branch: d.branch.to_owned(),
@@ -356,7 +376,7 @@ fn dep2shared_dep(dep: &Dependency) -> SourceType {
     }
 }
 
-fn shared2dep(shared_dependency: &SharedDependency) -> Dependency {
+fn shared2dep(shared_dependency: &SharedDependency, workspace_base: &PathBuf) -> Dependency {
     let SharedDependency {
         default_features,
         source,
@@ -391,6 +411,16 @@ fn shared2dep(shared_dependency: &SharedDependency) -> Dependency {
             features: None,
             optional: None,
             default_features: if *default_features { None } else { Some(false) },
+        }),
+        DependencySource::Path(path) => Dependency::Detailed(DependencyDetail {
+            path: Some(
+                path.strip_prefix(workspace_base)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            default_features: if *default_features { None } else { Some(false) },
+            ..DependencyDetail::default()
         }),
     }
 }
