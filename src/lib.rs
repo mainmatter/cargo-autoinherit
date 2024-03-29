@@ -91,12 +91,16 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         .expect("Failed to find `[workspace.dependencies]` table in root manifest.");
     let mut was_modified = false;
     for (package_name, source) in &package_name2inherited_source {
-        insert_preserving_decor(
-            workspace_deps,
-            package_name,
-            dep2toml_item(&shared2dep(source)),
-        );
-        was_modified = true;
+        if workspace_deps.get(package_name).is_some() {
+            continue;
+        } else {
+            insert_preserving_decor(
+                workspace_deps,
+                package_name,
+                dep2toml_item(&shared2dep(source)),
+            );
+            was_modified = true;
+        }
     }
     if was_modified {
         fs_err::write(
