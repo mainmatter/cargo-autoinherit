@@ -92,10 +92,6 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
     let mut was_modified = false;
     for (package_name, source) in &package_name2inherited_source {
         if workspace_deps.get(package_name).is_some() {
-            eprintln!(
-                "`{}` won't be auto-inherited because it's already present in the root manifest.",
-                package_name
-            );
             continue;
         } else {
             insert_preserving_decor(
