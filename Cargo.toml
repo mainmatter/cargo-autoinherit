@@ -1,6 +1,6 @@
 [package]
 name = "cargo-autoinherit"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Luca Palmieri <rust@lpalmieri.com>"]
 description = "A cargo sub-command to leverage dependency inheritance wherever possible"
