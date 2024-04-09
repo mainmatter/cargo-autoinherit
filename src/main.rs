@@ -1,4 +1,5 @@
 use cargo_autoinherit::{auto_inherit, AutoInheritConf};
+use std::process::ExitCode;
 
 use clap::Parser;
 
@@ -16,7 +17,7 @@ pub enum CargoInvocation {
     AutoInherit(AutoInheritConf),
 }
 
-fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<ExitCode, anyhow::Error> {
     let cli = CliWrapper::parse();
     let CargoInvocation::AutoInherit(conf) = cli.command;
     auto_inherit(conf)
