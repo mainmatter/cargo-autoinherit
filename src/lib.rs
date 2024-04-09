@@ -4,11 +4,12 @@ use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest};
 use guppy::VersionReq;
 use std::collections::BTreeMap;
 use std::fmt::Formatter;
+use std::process::ExitCode;
 use toml_edit::{Array, Key};
 
 mod dedup;
 
-pub fn auto_inherit() -> Result<(), anyhow::Error> {
+pub fn auto_inherit(check: bool) -> Result<ExitCode, anyhow::Error> {
     let metadata = guppy::MetadataCommand::new().exec().context(
         "Failed to execute `cargo metadata`. Was the command invoked inside a Rust project?",
     )?;
@@ -89,20 +90,24 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
         .as_table_mut()
         .expect("Failed to find `[workspace.dependencies]` table in root manifest.");
-    let mut was_modified = false;
+    let mut workspace_was_modified = false;
     for (package_name, source) in &package_name2inherited_source {
         if workspace_deps.get(package_name).is_some() {
             continue;
         } else {
-            insert_preserving_decor(
-                workspace_deps,
-                package_name,
-                dep2toml_item(&shared2dep(source)),
-            );
-            was_modified = true;
+            if check {
+                eprintln!("Dependency should move to workspace: {}", package_name);
+            } else {
+                insert_preserving_decor(
+                    workspace_deps,
+                    package_name,
+                    dep2toml_item(&shared2dep(source)),
+                );
+            }
+            workspace_was_modified = true;
         }
     }
-    if was_modified {
+    if workspace_was_modified && !check {
         fs_err::write(
             workspace_root.join("Cargo.toml").as_std_path(),
             workspace_toml.to_string(),
@@ -111,6 +116,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
     }
 
     // Inherit new "shared" dependencies in each member's manifest
+    let mut any_member_was_modified = false;
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
         let manifest_contents = fs_err::read_to_string(package.manifest_path().as_std_path())
@@ -120,7 +126,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         let mut manifest_toml: toml_edit::DocumentMut = manifest_contents
             .parse()
             .context("Failed to parse root manifest")?;
-        let mut was_modified = false;
+        let mut member_was_modified = false;
         if let Some(deps) = &manifest.dependencies {
             let deps_toml = manifest_toml["dependencies"]
                 .as_table_mut()
@@ -129,7 +135,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
                 deps,
                 deps_toml,
                 &package_name2inherited_source,
-                &mut was_modified,
+                &mut member_was_modified,
             );
         }
         if let Some(deps) = &manifest.dev_dependencies {
@@ -140,7 +146,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
                 deps,
                 deps_toml,
                 &package_name2inherited_source,
-                &mut was_modified,
+                &mut member_was_modified,
             );
         }
         if let Some(deps) = &manifest.build_dependencies {
@@ -151,19 +157,26 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
                 deps,
                 deps_toml,
                 &package_name2inherited_source,
-                &mut was_modified,
+                &mut member_was_modified,
             );
         }
-        if was_modified {
-            fs_err::write(
-                package.manifest_path().as_std_path(),
-                manifest_toml.to_string(),
-            )
-            .context("Failed to write manifest")?;
+        if member_was_modified {
+            any_member_was_modified = true;
+            if !check {
+                fs_err::write(
+                    package.manifest_path().as_std_path(),
+                    manifest_toml.to_string(),
+                )
+                .context("Failed to write manifest")?;
+            }
         }
     }
 
-    Ok(())
+    if check && (workspace_was_modified || any_member_was_modified) {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
 }
 
 enum Action {
