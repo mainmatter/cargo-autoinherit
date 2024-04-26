@@ -2,6 +2,10 @@
 
 A Cargo subcommand to automatically DRY up your `Cargo.toml` manifests in a workspace.  
 
+> [!NOTE]
+> This project has been created by [Mainmatter](https://mainmatter.com/rust-consulting/).  
+> Check out our [landing page](https://mainmatter.com/rust-consulting/) if you're looking for Rust consulting or training!
+
 ## The problem
 
 When you have multiple packages in a Cargo workspace, you often end up depending on the same packages
