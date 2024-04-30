@@ -8,7 +8,7 @@ use toml_edit::{Array, Key};
 
 mod dedup;
 
-pub fn auto_inherit(excluded: Vec<String>) -> Result<(), anyhow::Error> {
+pub fn auto_inherit(excluded: Vec<String>, dry_run: bool) -> Result<i32, anyhow::Error> {
     let metadata = guppy::MetadataCommand::new().exec().context(
         "Failed to execute `cargo metadata`. Was the command invoked inside a Rust project?",
     )?;
@@ -60,15 +60,19 @@ pub fn auto_inherit(excluded: Vec<String>) -> Result<(), anyhow::Error> {
         }
     }
 
+    let mut any_not_inheritable = false;
+
     let mut package_name2inherited_source: BTreeMap<String, SharedDependency> = BTreeMap::new();
     'outer: for (package_name, action) in package_name2specs {
         let Action::TryInherit(specs) = action else {
             eprintln!("`{package_name}` won't be auto-inherited because it appears at least once from a source type \
                 that we currently don't support (e.g. private registry, path dependency).");
+            any_not_inheritable = true;
             continue;
         };
         if specs.len() > 1 {
             eprintln!("`{package_name}` won't be auto-inherited because there are multiple sources for it:");
+            any_not_inheritable = true;
             for spec in specs.into_iter() {
                 eprintln!("  - {}", spec.source);
             }
@@ -78,6 +82,8 @@ pub fn auto_inherit(excluded: Vec<String>) -> Result<(), anyhow::Error> {
         let spec = specs.into_iter().next().unwrap();
         package_name2inherited_source.insert(package_name, spec);
     }
+
+    let mut any_was_modified = false;
 
     // Add new "shared" dependencies to `[workspace.dependencies]`
     let mut workspace_toml: toml_edit::DocumentMut = {
@@ -110,11 +116,16 @@ pub fn auto_inherit(excluded: Vec<String>) -> Result<(), anyhow::Error> {
         }
     }
     if was_modified {
-        fs_err::write(
-            workspace_root.join("Cargo.toml").as_std_path(),
-            workspace_toml.to_string(),
-        )
-        .context("Failed to write manifest")?;
+        if dry_run {
+            any_was_modified = true;
+            eprintln!("Workspace-level Cargo.toml would be modified");
+        } else {
+            fs_err::write(
+                workspace_root.join("Cargo.toml").as_std_path(),
+                workspace_toml.to_string(),
+            )
+            .context("Failed to write manifest")?;
+        }
     }
 
     // Inherit new "shared" dependencies in each member's manifest
@@ -166,15 +177,27 @@ pub fn auto_inherit(excluded: Vec<String>) -> Result<(), anyhow::Error> {
             );
         }
         if was_modified {
-            fs_err::write(
-                package.manifest_path().as_std_path(),
-                manifest_toml.to_string(),
-            )
-            .context("Failed to write manifest")?;
+            if dry_run {
+                any_was_modified = true;
+                eprintln!(
+                    "Cargo.toml of package `{}` would be modified",
+                    package.name()
+                );
+            } else {
+                fs_err::write(
+                    package.manifest_path().as_std_path(),
+                    manifest_toml.to_string(),
+                )
+                .context("Failed to write manifest")?;
+            }
         }
     }
 
-    Ok(())
+    if dry_run && (any_was_modified || any_not_inheritable) {
+        Ok(1)
+    } else {
+        Ok(0)
+    }
 }
 
 enum Action {

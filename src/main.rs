@@ -21,12 +21,23 @@ pub struct AutoInheritArgs {
     /// Package name(s) of workspace member(s) to exclude.
     #[arg(short, long)]
     exclude: Vec<String>,
+
+    /// No changes but exit code 1 if anything would be changed or any dependencies cannot be inherited.
+    #[arg(short, long, action)]
+    dry_run: bool,
 }
 
 fn main() -> Result<(), anyhow::Error> {
     let cli = CliWrapper::parse();
 
     match cli.command {
-        CargoInvocation::AutoInherit(args) => auto_inherit(args.exclude),
+        CargoInvocation::AutoInherit(args) => {
+            let code = auto_inherit(args.exclude, args.dry_run)?;
+            if code != 0 {
+                std::process::exit(code);
+            } else {
+                Ok(())
+            }
+        }
     }
 }
