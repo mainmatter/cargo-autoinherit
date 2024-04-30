@@ -2,13 +2,13 @@ use crate::dedup::MinimalVersionSet;
 use anyhow::Context;
 use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest};
 use guppy::VersionReq;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Formatter;
 use toml_edit::{Array, Key};
 
 mod dedup;
 
-pub fn auto_inherit() -> Result<(), anyhow::Error> {
+pub fn auto_inherit(excluded: Vec<String>, dry_run: bool) -> Result<i32, anyhow::Error> {
     let metadata = guppy::MetadataCommand::new().exec().context(
         "Failed to execute `cargo metadata`. Was the command invoked inside a Rust project?",
     )?;
@@ -28,6 +28,7 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
             workspace_root
         )
     };
+    let excluded = BTreeSet::from_iter(excluded);
 
     let mut package_name2specs: BTreeMap<String, Action> = BTreeMap::new();
     if let Some(deps) = &workspace.dependencies {
@@ -37,6 +38,12 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
         assert!(package.in_workspace());
+
+        if excluded.contains(package.name()) {
+            println!("Excluded package `{}`", package.name());
+            continue;
+        }
+
         let manifest: Manifest = {
             let contents = fs_err::read_to_string(package.manifest_path().as_std_path())
                 .context("Failed to read root manifest")?;
@@ -53,15 +60,19 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         }
     }
 
+    let mut any_not_inheritable = false;
+
     let mut package_name2inherited_source: BTreeMap<String, SharedDependency> = BTreeMap::new();
     'outer: for (package_name, action) in package_name2specs {
         let Action::TryInherit(specs) = action else {
             eprintln!("`{package_name}` won't be auto-inherited because it appears at least once from a source type \
                 that we currently don't support (e.g. private registry, path dependency).");
+            any_not_inheritable = true;
             continue;
         };
         if specs.len() > 1 {
             eprintln!("`{package_name}` won't be auto-inherited because there are multiple sources for it:");
+            any_not_inheritable = true;
             for spec in specs.into_iter() {
                 eprintln!("  - {}", spec.source);
             }
@@ -71,6 +82,8 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         let spec = specs.into_iter().next().unwrap();
         package_name2inherited_source.insert(package_name, spec);
     }
+
+    let mut any_was_modified = false;
 
     // Add new "shared" dependencies to `[workspace.dependencies]`
     let mut workspace_toml: toml_edit::DocumentMut = {
@@ -103,16 +116,25 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
         }
     }
     if was_modified {
-        fs_err::write(
-            workspace_root.join("Cargo.toml").as_std_path(),
-            workspace_toml.to_string(),
-        )
-        .context("Failed to write manifest")?;
+        if dry_run {
+            any_was_modified = true;
+            eprintln!("Workspace-level Cargo.toml would be modified");
+        } else {
+            fs_err::write(
+                workspace_root.join("Cargo.toml").as_std_path(),
+                workspace_toml.to_string(),
+            )
+            .context("Failed to write manifest")?;
+        }
     }
 
     // Inherit new "shared" dependencies in each member's manifest
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
+        if excluded.contains(package.name()) {
+            continue;
+        }
+
         let manifest_contents = fs_err::read_to_string(package.manifest_path().as_std_path())
             .context("Failed to read root manifest")?;
         let manifest: Manifest =
@@ -155,15 +177,27 @@ pub fn auto_inherit() -> Result<(), anyhow::Error> {
             );
         }
         if was_modified {
-            fs_err::write(
-                package.manifest_path().as_std_path(),
-                manifest_toml.to_string(),
-            )
-            .context("Failed to write manifest")?;
+            if dry_run {
+                any_was_modified = true;
+                eprintln!(
+                    "Cargo.toml of package `{}` would be modified",
+                    package.name()
+                );
+            } else {
+                fs_err::write(
+                    package.manifest_path().as_std_path(),
+                    manifest_toml.to_string(),
+                )
+                .context("Failed to write manifest")?;
+            }
         }
     }
 
-    Ok(())
+    if dry_run && (any_was_modified || any_not_inheritable) {
+        Ok(1)
+    } else {
+        Ok(0)
+    }
 }
 
 enum Action {
