@@ -2,7 +2,7 @@ use crate::dedup::MinimalVersionSet;
 use anyhow::Context;
 use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest};
 use guppy::VersionReq;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Formatter;
 use toml_edit::{Array, Key};
 
@@ -15,6 +15,9 @@ pub struct AutoInheritConf {
         help = "Represents inherited dependencies as `package.workspace = true` if possible."
     )]
     pub prefer_simple_dotted: bool,
+    /// Package name(s) of workspace member(s) to exclude.
+    #[arg(short, long)]
+    exclude: Vec<String>,
 }
 
 /// Rewrites a `path` dependency as being absolute, based on a given path
@@ -76,7 +79,7 @@ macro_rules! get_either_table_mut {
     };
 }
 
-pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
+pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
     let metadata = guppy::MetadataCommand::new().exec().context(
         "Failed to execute `cargo metadata`. Was the command invoked inside a Rust project?",
     )?;
@@ -96,6 +99,7 @@ pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
             workspace_root
         )
     };
+    let excluded = BTreeSet::from_iter(conf.exclude);
 
     let mut package_name2specs: BTreeMap<String, Action> = BTreeMap::new();
     if let Some(deps) = &mut workspace.dependencies {
@@ -106,7 +110,12 @@ pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
         assert!(package.in_workspace());
+
         let mut manifest: Manifest = {
+            if excluded.contains(package.name()) {
+                println!("Excluded package `{}`", package.name());
+                continue;
+            }
             let contents = fs_err::read_to_string(package.manifest_path().as_std_path())
                 .context("Failed to read root manifest")?;
             toml::from_str(&contents).context("Failed to parse root manifest")?
@@ -193,6 +202,10 @@ pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
     // Inherit new "shared" dependencies in each member's manifest
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
+        if excluded.contains(package.name()) {
+            continue;
+        }
+
         let manifest_contents = fs_err::read_to_string(package.manifest_path().as_std_path())
             .context("Failed to read root manifest")?;
         let manifest: Manifest =
