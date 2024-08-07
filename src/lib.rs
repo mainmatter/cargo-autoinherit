@@ -348,9 +348,11 @@ enum DependencySource {
         branch: Option<String>,
         tag: Option<String>,
         rev: Option<String>,
+        version: Option<VersionReq>,
     },
     Path {
         path: String,
+        version: Option<VersionReq>,
     },
 }
 
@@ -363,6 +365,7 @@ impl std::fmt::Display for DependencySource {
                 branch,
                 tag,
                 rev,
+                version,
             } => {
                 write!(f, "git: {}", git)?;
                 if let Some(branch) = branch {
@@ -374,10 +377,16 @@ impl std::fmt::Display for DependencySource {
                 if let Some(rev) = rev {
                     write!(f, ", rev: {}", rev)?;
                 }
+                if let Some(version) = version {
+                    write!(f, ", version: {}", version)?;
+                }
                 Ok(())
             }
-            DependencySource::Path { path } => {
+            DependencySource::Path { path, version } => {
                 write!(f, "path: {}", path)?;
+                if let Some(version) = version {
+                    write!(f, ", version: {}", version)?;
+                }
                 Ok(())
             }
         }
@@ -410,6 +419,9 @@ fn dep2shared_dep(dep: &Dependency) -> SourceType {
             if d.path.is_some() {
                 source = Some(DependencySource::Path {
                     path: d.path.as_ref().unwrap().to_owned(),
+                    version: d.version.as_ref().map(|v| {
+                        VersionReq::parse(v).expect("Failed to parse version requirement")
+                    }),
                 });
             } else if let Some(git) = &d.git {
                 source = Some(DependencySource::Git {
@@ -417,6 +429,9 @@ fn dep2shared_dep(dep: &Dependency) -> SourceType {
                     branch: d.branch.to_owned(),
                     tag: d.tag.to_owned(),
                     rev: d.rev.to_owned(),
+                    version: d.version.as_ref().map(|v| {
+                        VersionReq::parse(v).expect("Failed to parse version requirement")
+                    }),
                 });
             } else if let Some(version) = &d.version {
                 let version_req =
@@ -456,9 +471,10 @@ fn shared2dep(shared_dependency: &SharedDependency) -> Dependency {
             branch,
             tag,
             rev,
+            version,
         } => Dependency::Detailed(DependencyDetail {
             package: None,
-            version: None,
+            version: version.as_ref().map(|v| v.to_string()),
             registry: None,
             registry_index: None,
             path: None,
@@ -470,9 +486,9 @@ fn shared2dep(shared_dependency: &SharedDependency) -> Dependency {
             optional: None,
             default_features: if *default_features { None } else { Some(false) },
         }),
-        DependencySource::Path { path } => Dependency::Detailed(DependencyDetail {
+        DependencySource::Path { path, version } => Dependency::Detailed(DependencyDetail {
             package: None,
-            version: None,
+            version: version.as_ref().map(|v| v.to_string()),
             registry: None,
             registry_index: None,
             path: Some(path.clone()),
