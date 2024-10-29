@@ -1,4 +1,4 @@
-use cargo_autoinherit::auto_inherit;
+use cargo_autoinherit::{auto_inherit, AutoInheritConf};
 
 use clap::Parser;
 
@@ -13,10 +13,11 @@ struct CliWrapper {
 pub enum CargoInvocation {
     /// Automatically centralize all dependencies as workspace dependencies.
     #[command(name = "autoinherit")]
-    AutoInherit,
+    AutoInherit(AutoInheritConf),
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    let _cli = CliWrapper::parse();
-    auto_inherit()
+    let cli = CliWrapper::parse();
+    let CargoInvocation::AutoInherit(conf) = cli.command;
+    auto_inherit(&conf)
 }
