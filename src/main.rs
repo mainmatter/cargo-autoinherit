@@ -13,21 +13,11 @@ struct CliWrapper {
 pub enum CargoInvocation {
     /// Automatically centralize all dependencies as workspace dependencies.
     #[command(name = "autoinherit")]
-    AutoInherit {
-        /// Represents inherited dependencies as `package.workspace = true` if possible.
-        #[arg(long)]
-        prefer_simple_dotted: bool,
-    },
+    AutoInherit(AutoInheritConf),
 }
 
 fn main() -> Result<(), anyhow::Error> {
     let cli = CliWrapper::parse();
-    let conf = match cli.command {
-        CargoInvocation::AutoInherit {
-            prefer_simple_dotted,
-        } => AutoInheritConf {
-            prefer_simple_dotted,
-        },
-    };
+    let CargoInvocation::AutoInherit(conf) = cli.command;
     auto_inherit(&conf)
 }

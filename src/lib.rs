@@ -8,9 +8,12 @@ use toml_edit::{Array, Key};
 
 mod dedup;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, clap::Args)]
 pub struct AutoInheritConf {
-    /// Represents inherited dependencies as `package.workspace = true` if possible.
+    #[arg(
+        long,
+        help = "Represents inherited dependencies as `package.workspace = true` if possible."
+    )]
     pub prefer_simple_dotted: bool,
 }
 
