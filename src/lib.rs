@@ -261,7 +261,12 @@ fn insert_preserving_decor(table: &mut toml_edit::Table, key: &str, mut value: t
     let mut new_key = Key::new(key);
     if let Some((existing_key, existing_value)) = table.get_key_value(key) {
         new_key = new_key.with_leaf_decor(existing_key.leaf_decor().to_owned());
-        if let Some(decor) = get_decor(existing_value) {
+
+        if let Some(mut decor) = get_decor(existing_value) {
+            // Tables tend to have newline whitespacing that doesn't agree with other types
+            if existing_value.is_table() && !value.is_table() {
+                decor.set_prefix(" ");
+            }
             set_decor(&mut value, decor);
         }
     }
