@@ -17,12 +17,12 @@ pub struct AutoInheritConf {
     pub prefer_simple_dotted: bool,
     /// Package name(s) of workspace member(s) to exclude.
     #[arg(short, long)]
-    exclude: Vec<String>,
+    exclude_members: Vec<String>,
 }
 
 #[derive(Debug, Default)]
 struct AutoInheritMetadata {
-    exclude: Vec<String>,
+    exclude_members: Vec<String>,
 }
 
 impl AutoInheritMetadata {
@@ -51,7 +51,9 @@ impl AutoInheritMetadata {
                 })?,
             _ => return Err(error()),
         };
-        Ok(Self { exclude })
+        Ok(Self {
+            exclude_members: exclude,
+        })
     }
 }
 
@@ -136,8 +138,11 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
     };
 
     let autoinherit_metadata = AutoInheritMetadata::from_workspace(workspace)?;
-    let excluded =
-        BTreeSet::from_iter(conf.exclude.into_iter().chain(autoinherit_metadata.exclude));
+    let excluded_members = BTreeSet::from_iter(
+        conf.exclude_members
+            .into_iter()
+            .chain(autoinherit_metadata.exclude_members),
+    );
 
     let mut package_name2specs: BTreeMap<String, Action> = BTreeMap::new();
     if let Some(deps) = &mut workspace.dependencies {
@@ -150,7 +155,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
         assert!(package.in_workspace());
 
         let mut manifest: Manifest = {
-            if excluded.contains(package.name()) {
+            if excluded_members.contains(package.name()) {
                 println!("Excluded workspace member `{}`", package.name());
                 continue;
             }
@@ -240,7 +245,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
     // Inherit new "shared" dependencies in each member's manifest
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
-        if excluded.contains(package.name()) {
+        if excluded_members.contains(package.name()) {
             continue;
         }
 
