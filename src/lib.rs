@@ -1,6 +1,6 @@
 use crate::dedup::MinimalVersionSet;
-use anyhow::Context;
-use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest};
+use anyhow::{anyhow, Context};
+use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest, Workspace};
 use guppy::VersionReq;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Formatter;
@@ -18,6 +18,41 @@ pub struct AutoInheritConf {
     /// Package name(s) of workspace member(s) to exclude.
     #[arg(short, long)]
     exclude: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct AutoInheritMetadata {
+    exclude: Vec<String>,
+}
+
+impl AutoInheritMetadata {
+    fn from_workspace(workspace: &Workspace<toml::Table>) -> Result<Self, anyhow::Error> {
+        fn error() -> anyhow::Error {
+            anyhow!("Excpected value of `exclude` in `workspace.metadata.cargo-autoinherit` to be an array of strings")
+        }
+
+        let Some(exclude) = workspace
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("cargo-autoinherit"))
+            .and_then(|v| v.as_table())
+            .and_then(|t| t.get("exclude-members").or(t.get("exclude_members")))
+        else {
+            return Ok(Self::default());
+        };
+
+        let exclude: Vec<String> = match exclude {
+            toml::Value::Array(excluded) => excluded
+                .iter()
+                .map(|v| v.as_str().ok_or_else(error).map(|s| s.to_string()))
+                .try_fold(Vec::with_capacity(excluded.len()), |mut res, item| {
+                    res.push(item?);
+                    Ok::<_, anyhow::Error>(res)
+                })?,
+            _ => return Err(error()),
+        };
+        Ok(Self { exclude })
+    }
 }
 
 /// Rewrites a `path` dependency as being absolute, based on a given path
@@ -87,7 +122,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
         .build_graph()
         .context("Failed to build package graph")?;
     let workspace_root = graph.workspace().root();
-    let mut root_manifest: Manifest = {
+    let mut root_manifest: Manifest<toml::Value, toml::Table> = {
         let contents = fs_err::read_to_string(workspace_root.join("Cargo.toml").as_std_path())
             .context("Failed to read root manifest")?;
         toml::from_str(&contents).context("Failed to parse root manifest")?
@@ -99,7 +134,10 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
             workspace_root
         )
     };
-    let excluded = BTreeSet::from_iter(conf.exclude);
+
+    let autoinherit_metadata = AutoInheritMetadata::from_workspace(workspace)?;
+    let excluded =
+        BTreeSet::from_iter(conf.exclude.into_iter().chain(autoinherit_metadata.exclude));
 
     let mut package_name2specs: BTreeMap<String, Action> = BTreeMap::new();
     if let Some(deps) = &mut workspace.dependencies {
@@ -113,7 +151,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
 
         let mut manifest: Manifest = {
             if excluded.contains(package.name()) {
-                println!("Excluded package `{}`", package.name());
+                println!("Excluded workspace member `{}`", package.name());
                 continue;
             }
             let contents = fs_err::read_to_string(package.manifest_path().as_std_path())

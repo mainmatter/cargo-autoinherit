@@ -43,6 +43,33 @@ It collects all the dependencies in your workspace, determines which ones can be
 the `[workspace.dependencies]` section of the root `Cargo.toml`. It also takes care of updating the members' 
 `Cargo.toml` files, setting the correct `features` field for each package.
 
+To exclude workspace members from the autoinherit process, you can either pass their packgage names as an
+option like so:
+
+```bash
+cargo autoinherit -e cargo-inherit-test-web
+```
+
+or you can define the exclusion in the workspace metadata:
+
+```toml
+# Cargo.toml
+[workspace]
+members = [
+    "cli",
+    "config",
+    "db",
+    "web",
+    "macros"
+]
+
+[workspace.metadata.cargo-autoinherit]
+# Skip cargo-autoinherit for these packages
+exclude-members = [
+    "cargo-autoinherit-test-web" # <= This member will be excluded
+]
+```
+
 ## Installation
 
 You can find prebuilt binaries on the [Releases page](https://github.com/mainmatter/cargo-autoinherit/releases).  
