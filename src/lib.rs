@@ -235,7 +235,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<ExitCode, anyhow::Error> {
             continue;
         } else {
             if conf.check {
-                eprintln!("Dependency should move to workspace: {}", package_name);
+                eprintln!("`{package_name}` should be declared as a workspace dependency.");
             } else {
                 let mut dep = shared2dep(source);
                 rewrite_dep_path_as_relative(&mut dep, workspace_root);
@@ -282,6 +282,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<ExitCode, anyhow::Error> {
                 &package_name2inherited_source,
                 &mut member_was_modified,
                 conf.prefer_simple_dotted,
+                conf.check,
             );
         }
         if let Some(deps) = &manifest.dev_dependencies {
@@ -294,6 +295,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<ExitCode, anyhow::Error> {
                 &package_name2inherited_source,
                 &mut member_was_modified,
                 conf.prefer_simple_dotted,
+                conf.check,
             );
         }
         if let Some(deps) = &manifest.build_dependencies {
@@ -306,6 +308,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<ExitCode, anyhow::Error> {
                 &package_name2inherited_source,
                 &mut member_was_modified,
                 conf.prefer_simple_dotted,
+                conf.check,
             );
         }
         if member_was_modified {
@@ -344,6 +347,7 @@ fn inherit_deps(
     package_name2spec: &BTreeMap<String, SharedDependency>,
     was_modified: &mut bool,
     prefer_simple_dotted: bool,
+    check: bool,
 ) {
     for (name, dep) in deps {
         let package_name = dep.package().unwrap_or(name.as_str());
@@ -352,34 +356,53 @@ fn inherit_deps(
         }
         match dep {
             Dependency::Simple(_) => {
-                let mut inherited = toml_edit::InlineTable::new();
-                inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
-                inherited.set_dotted(prefer_simple_dotted);
+                if check {
+                    eprintln!("`{package_name}` should inherit from a workspace dependency.");
+                } else {
+                    let mut inherited = toml_edit::InlineTable::new();
+                    inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
+                    inherited.set_dotted(prefer_simple_dotted);
 
-                insert_preserving_decor(toml_deps, name, toml_edit::Item::Value(inherited.into()));
-                *was_modified = true;
+                    println!("I: {name} = {}", inherited);
+
+                    insert_preserving_decor(
+                        toml_deps,
+                        name,
+                        toml_edit::Item::Value(inherited.into()),
+                    );
+                    *was_modified = true;
+                }
             }
             Dependency::Inherited(_) => {
                 // Nothing to do.
             }
             Dependency::Detailed(details) => {
-                let mut inherited = toml_edit::InlineTable::new();
-                inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
-                if let Some(features) = &details.features {
-                    inherited.insert(
-                        "features",
-                        toml_edit::Value::Array(Array::from_iter(features.iter())),
+                if check {
+                    eprintln!("`{package_name}` should inherit from a workspace dependency.");
+                } else {
+                    let mut inherited = toml_edit::InlineTable::new();
+                    inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
+                    if let Some(features) = &details.features {
+                        inherited.insert(
+                            "features",
+                            toml_edit::Value::Array(Array::from_iter(features.iter())),
+                        );
+                    }
+                    if let Some(optional) = details.optional {
+                        inherited
+                            .insert("optional", toml_edit::value(optional).into_value().unwrap());
+                    }
+
+                    if inherited.len() == 1 {
+                        inherited.set_dotted(prefer_simple_dotted);
+                    }
+
+                    insert_preserving_decor(
+                        toml_deps,
+                        name,
+                        toml_edit::Item::Value(inherited.into()),
                     );
                 }
-                if let Some(optional) = details.optional {
-                    inherited.insert("optional", toml_edit::value(optional).into_value().unwrap());
-                }
-
-                if inherited.len() == 1 {
-                    inherited.set_dotted(prefer_simple_dotted);
-                }
-
-                insert_preserving_decor(toml_deps, name, toml_edit::Item::Value(inherited.into()));
                 *was_modified = true;
             }
         }
