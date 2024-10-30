@@ -17,6 +17,38 @@ pub struct AutoInheritConf {
     pub prefer_simple_dotted: bool,
 }
 
+/// Rewrites a `path` dependency as being absolute, based on a given path
+fn rewrite_dep_paths_as_absolute<'a, P: AsRef<std::path::Path>>(
+    deps: impl Iterator<Item = &'a mut Dependency>,
+    parent: P,
+) {
+    deps.for_each(|dep| {
+        if let Dependency::Detailed(detail) = dep {
+            detail.path = detail.path.as_mut().map(|path| {
+                parent
+                    .as_ref()
+                    .join(path)
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+        }
+    });
+}
+
+/// Rewrites a `path` dependency as being relative, based on a given path
+fn rewrite_dep_path_as_relative<P: AsRef<std::path::Path>>(dep: &mut Dependency, parent: P) {
+    if let Dependency::Detailed(detail) = dep {
+        detail.path = detail.path.as_mut().map(|path| {
+            pathdiff::diff_paths(path, parent.as_ref())
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
+    }
+}
+
 pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
     let metadata = guppy::MetadataCommand::new().exec().context(
         "Failed to execute `cargo metadata`. Was the command invoked inside a Rust project?",
@@ -39,25 +71,38 @@ pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
     };
 
     let mut package_name2specs: BTreeMap<String, Action> = BTreeMap::new();
-    if let Some(deps) = &workspace.dependencies {
+    if let Some(deps) = &mut workspace.dependencies {
+        rewrite_dep_paths_as_absolute(deps.values_mut(), workspace_root);
         process_deps(deps, &mut package_name2specs);
     }
 
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
         assert!(package.in_workspace());
-        let manifest: Manifest = {
+        let mut manifest: Manifest = {
             let contents = fs_err::read_to_string(package.manifest_path().as_std_path())
                 .context("Failed to read root manifest")?;
             toml::from_str(&contents).context("Failed to parse root manifest")?
         };
-        if let Some(deps) = &manifest.dependencies {
+        if let Some(deps) = &mut manifest.dependencies {
+            rewrite_dep_paths_as_absolute(
+                deps.values_mut(),
+                package.manifest_path().parent().unwrap(),
+            );
             process_deps(deps, &mut package_name2specs);
         }
-        if let Some(deps) = &manifest.dev_dependencies {
+        if let Some(deps) = &mut manifest.dev_dependencies {
+            rewrite_dep_paths_as_absolute(
+                deps.values_mut(),
+                package.manifest_path().parent().unwrap(),
+            );
             process_deps(deps, &mut package_name2specs);
         }
-        if let Some(deps) = &manifest.build_dependencies {
+        if let Some(deps) = &mut manifest.build_dependencies {
+            rewrite_dep_paths_as_absolute(
+                deps.values_mut(),
+                package.manifest_path().parent().unwrap(),
+            );
             process_deps(deps, &mut package_name2specs);
         }
     }
@@ -103,11 +148,10 @@ pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
         if workspace_deps.get(package_name).is_some() {
             continue;
         } else {
-            insert_preserving_decor(
-                workspace_deps,
-                package_name,
-                dep2toml_item(&shared2dep(source)),
-            );
+            let mut dep = shared2dep(source);
+            rewrite_dep_path_as_relative(&mut dep, workspace_root);
+
+            insert_preserving_decor(workspace_deps, package_name, dep2toml_item(&dep));
             was_modified = true;
         }
     }
@@ -304,6 +348,11 @@ enum DependencySource {
         branch: Option<String>,
         tag: Option<String>,
         rev: Option<String>,
+        version: Option<VersionReq>,
+    },
+    Path {
+        path: String,
+        version: Option<VersionReq>,
     },
 }
 
@@ -316,6 +365,7 @@ impl std::fmt::Display for DependencySource {
                 branch,
                 tag,
                 rev,
+                version,
             } => {
                 write!(f, "git: {}", git)?;
                 if let Some(branch) = branch {
@@ -326,6 +376,16 @@ impl std::fmt::Display for DependencySource {
                 }
                 if let Some(rev) = rev {
                     write!(f, ", rev: {}", rev)?;
+                }
+                if let Some(version) = version {
+                    write!(f, ", version: {}", version)?;
+                }
+                Ok(())
+            }
+            DependencySource::Path { path, version } => {
+                write!(f, "path: {}", path)?;
+                if let Some(version) = version {
+                    write!(f, ", version: {}", version)?;
                 }
                 Ok(())
             }
@@ -356,16 +416,22 @@ fn dep2shared_dep(dep: &Dependency) -> SourceType {
             if d.registry.is_some() || d.registry_index.is_some() {
                 return SourceType::MustBeSkipped;
             }
-            // We ignore path deps for now.
             if d.path.is_some() {
-                return SourceType::MustBeSkipped;
-            }
-            if let Some(git) = &d.git {
+                source = Some(DependencySource::Path {
+                    path: d.path.as_ref().unwrap().to_owned(),
+                    version: d.version.as_ref().map(|v| {
+                        VersionReq::parse(v).expect("Failed to parse version requirement")
+                    }),
+                });
+            } else if let Some(git) = &d.git {
                 source = Some(DependencySource::Git {
                     git: git.to_owned(),
                     branch: d.branch.to_owned(),
                     tag: d.tag.to_owned(),
                     rev: d.rev.to_owned(),
+                    version: d.version.as_ref().map(|v| {
+                        VersionReq::parse(v).expect("Failed to parse version requirement")
+                    }),
                 });
             } else if let Some(version) = &d.version {
                 let version_req =
@@ -405,9 +471,10 @@ fn shared2dep(shared_dependency: &SharedDependency) -> Dependency {
             branch,
             tag,
             rev,
+            version,
         } => Dependency::Detailed(DependencyDetail {
             package: None,
-            version: None,
+            version: version.as_ref().map(|v| v.to_string()),
             registry: None,
             registry_index: None,
             path: None,
@@ -415,6 +482,20 @@ fn shared2dep(shared_dependency: &SharedDependency) -> Dependency {
             branch: branch.clone(),
             tag: tag.clone(),
             rev: rev.clone(),
+            features: None,
+            optional: None,
+            default_features: if *default_features { None } else { Some(false) },
+        }),
+        DependencySource::Path { path, version } => Dependency::Detailed(DependencyDetail {
+            package: None,
+            version: version.as_ref().map(|v| v.to_string()),
+            registry: None,
+            registry_index: None,
+            path: Some(path.clone()),
+            git: None,
+            branch: None,
+            tag: None,
+            rev: None,
             features: None,
             optional: None,
             default_features: if *default_features { None } else { Some(false) },

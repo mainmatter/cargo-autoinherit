@@ -93,6 +93,7 @@ dependencies = [
  "clap",
  "fs-err",
  "guppy",
+ "pathdiff",
  "semver",
  "toml",
  "toml_edit",

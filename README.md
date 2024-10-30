@@ -61,7 +61,6 @@ cargo autoinherit
 
 ## Limitations
 
-- `cargo-autoinherit` won't auto-inherit path dependencies.
 - `cargo-autoinherit` won't auto-inherit dependencies from private registries.
 - `cargo-autoinherit` will only merge version requirements that are obviously compatible (e.g. 
   `^1.0.0` and `^1.1.5` will be merged to `^1.1.5`, but `^1.0.0` and `>=1,<2` won't be merged).
