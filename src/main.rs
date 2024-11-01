@@ -19,5 +19,5 @@ pub enum CargoInvocation {
 fn main() -> Result<(), anyhow::Error> {
     let cli = CliWrapper::parse();
     let CargoInvocation::AutoInherit(conf) = cli.command;
-    auto_inherit(&conf)
+    auto_inherit(conf)
 }

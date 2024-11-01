@@ -14,7 +14,7 @@ anyhow = "1.0.80"
 clap = { version = "4", features = ["derive"] }
 guppy = "0.17.5"
 fs-err = "2.11.0"
-cargo-manifest = "0.14.0"
+cargo-manifest = "0.16.0"
 toml = "0.8.10"
 semver = "1.0.22"
 toml_edit = "0.22.6"
