@@ -49,6 +49,33 @@ fn rewrite_dep_path_as_relative<P: AsRef<std::path::Path>>(dep: &mut Dependency,
     }
 }
 
+// Gets the first entry out of the document as a table if it exists,
+// or gets the second one if it doesn't. If that doesn't exist
+// either, then it returns an error.
+// Borrowing rules make it hard to do this in a function,
+// so here we are.
+macro_rules! get_either_table_mut {
+    ($first:literal, $second:literal, $manifest_toml:expr) => {
+        if let Some(i) = $manifest_toml
+            .get_mut($first)
+            .and_then(|d| d.as_table_mut())
+        {
+            Ok(i)
+        } else if let Some(i) = $manifest_toml
+            .get_mut($second)
+            .and_then(|d| d.as_table_mut())
+        {
+            Ok(i)
+        } else {
+            Err(anyhow::anyhow!(concat!(
+                "Failed to find `[",
+                $first,
+                "]` table in root manifest."
+            )))
+        }
+    };
+}
+
 pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
     let metadata = guppy::MetadataCommand::new().exec().context(
         "Failed to execute `cargo metadata`. Was the command invoked inside a Rust project?",
@@ -187,9 +214,9 @@ pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
             );
         }
         if let Some(deps) = &manifest.dev_dependencies {
-            let deps_toml = manifest_toml["dev-dependencies"]
-                .as_table_mut()
-                .expect("Failed to find `[dev-dependencies]` table in root manifest.");
+            let deps_toml =
+                get_either_table_mut!("dev-dependencies", "dev_dependencies", manifest_toml)?;
+
             inherit_deps(
                 deps,
                 deps_toml,
@@ -199,9 +226,9 @@ pub fn auto_inherit(conf: &AutoInheritConf) -> Result<(), anyhow::Error> {
             );
         }
         if let Some(deps) = &manifest.build_dependencies {
-            let deps_toml = manifest_toml["build-dependencies"]
-                .as_table_mut()
-                .expect("Failed to find `[build-dependencies]` table in root manifest.");
+            let deps_toml =
+                get_either_table_mut!("build-dependencies", "build_dependencies", manifest_toml)?;
+
             inherit_deps(
                 deps,
                 deps_toml,
