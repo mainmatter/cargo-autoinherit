@@ -82,8 +82,11 @@ fn rewrite_dep_path_as_relative<P: AsRef<std::path::Path>>(dep: &mut Dependency,
     if let Dependency::Detailed(detail) = dep {
         detail.path = detail.path.as_mut().map(|path| {
             pathdiff::diff_paths(path, parent.as_ref())
-                .unwrap()
-                .to_string_lossy()
+                .expect(
+                    "Error rewriting dependency path as relative: unable to determine path diff.",
+                )
+                .to_str()
+                .expect("Error rewriting dependency path as relative: path diff is not UTF-8.")
                 .to_string()
         })
     }
