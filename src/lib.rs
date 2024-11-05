@@ -70,7 +70,8 @@ fn rewrite_dep_paths_as_absolute<'a, P: AsRef<std::path::Path>>(
                     .join(path)
                     .canonicalize()
                     .unwrap()
-                    .to_string_lossy()
+                    .to_str()
+                    .expect("Canonicalized absolute path contained non-UTF-8 segments.")
                     .to_string()
             })
         }
@@ -81,7 +82,7 @@ fn rewrite_dep_paths_as_absolute<'a, P: AsRef<std::path::Path>>(
 fn rewrite_dep_path_as_relative<P: AsRef<std::path::Path>>(dep: &mut Dependency, parent: P) {
     if let Dependency::Detailed(detail) = dep {
         detail.path = detail.path.as_mut().map(|path| {
-            pathdiff::diff_paths(path, parent.as_ref())
+            pathdiff::diff_paths(path, parent.as_ref().canonicalize().unwrap())
                 .expect(
                     "Error rewriting dependency path as relative: unable to determine path diff.",
                 )
