@@ -1,0 +1,25 @@
+---
+source: tests/main.rs
+expression: input
+snapshot_kind: text
+---
+[package]
+name = "cargo-autoinherit-test-config"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[lib]
+# examples in docs don't run without config files being in place, etc.
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+dotenvy.workspace = true
+figment = { workspace = true, features = ["toml", "env"] }
+serde = { workspace = true, features = ["derive"] } 
+tracing.workspace = true
+
+[dev-dependencies]
+figment = { workspace = true, features = ["toml", "env", "test"] }
+googletest.workspace = true

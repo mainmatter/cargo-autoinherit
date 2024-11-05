@@ -1,0 +1,19 @@
+---
+source: tests/main.rs
+expression: input
+snapshot_kind: text
+---
+[package]
+name = "cargo-autoinherit-test-macros"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[lib]
+proc-macro = true
+# examples in docs don't run without a running database, etc.
+doctest = false
+
+[dependencies]
+quote = { workspace = true }
+syn = { workspace = true, features = ["full"] }

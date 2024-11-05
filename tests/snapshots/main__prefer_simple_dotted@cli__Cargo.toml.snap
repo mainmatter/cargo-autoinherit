@@ -1,0 +1,36 @@
+---
+source: tests/main.rs
+expression: input
+snapshot_kind: text
+---
+[package]
+name = "cargo-autoinherit-test-cli"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[lib]
+# examples in docs don't run without additional setup
+doctest = false
+
+[[bin]]
+name = "db"
+path = "src/bin/db.rs"
+[[bin]]
+name = "generate"
+path = "src/bin/generate.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap = { workspace = true, features = ["derive"] }
+cruet.workspace = true
+guppy.workspace = true
+include_dir.workspace = true
+liquid.workspace = true
+cargo-autoinherit-test-config.workspace = true
+sqlx = { workspace = true, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "uuid", "migrate", "chrono"] }
+url.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
+[dev-dependencies]
+insta.workspace = true

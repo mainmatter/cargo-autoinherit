@@ -4,6 +4,7 @@ use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest, Workspace}
 use guppy::VersionReq;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Formatter;
+use std::path::PathBuf;
 use toml_edit::{Array, Key};
 
 mod dedup;
@@ -17,7 +18,11 @@ pub struct AutoInheritConf {
     pub prefer_simple_dotted: bool,
     /// Package name(s) of workspace member(s) to exclude.
     #[arg(short, long)]
-    exclude_members: Vec<String>,
+    pub exclude_members: Vec<String>,
+
+    /// Path of the workspace manifest
+    #[arg(short, long)]
+    pub manifest_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -121,7 +126,10 @@ macro_rules! get_either_table_mut {
 }
 
 pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
-    let metadata = guppy::MetadataCommand::new().exec().context(
+    let mut metadata_cmd = guppy::MetadataCommand::new();
+    conf.manifest_path.map(|p| metadata_cmd.manifest_path(p));
+
+    let metadata = metadata_cmd.exec().context(
         "Failed to execute `cargo metadata`. Was the command invoked inside a Rust project?",
     )?;
     let graph = metadata

@@ -1,0 +1,36 @@
+---
+source: tests/main.rs
+expression: input
+snapshot_kind: text
+---
+[package]
+name = "cargo-autoinherit-test-cli"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[lib]
+# examples in docs don't run without additional setup
+doctest = false
+
+[[bin]]
+name = "db"
+path = "src/bin/db.rs"
+[[bin]]
+name = "generate"
+path = "src/bin/generate.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.4", features = ["derive"] }
+cruet = "0.14"
+guppy = "0.17"
+include_dir = "0.7"
+liquid = "~0.26"
+cargo-autoinherit-test-config = { path = "../config" }
+sqlx = { version = "0.8", features = [ "runtime-tokio", "tls-rustls", "postgres", "macros", "uuid", "migrate", "chrono" ] }
+url = "2.5"
+tokio = { version = "1.34", features = ["full"] }
+
+[dev-dependencies]
+insta = "1.38"
