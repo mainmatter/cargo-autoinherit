@@ -1,0 +1,31 @@
+---
+source: tests/main.rs
+expression: input
+snapshot_kind: text
+---
+[package]
+name = "cargo-autoinherit-test-db"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# examples in docs don't run without a running database, etc.
+doctest = false
+
+[features]
+test-helpers = ["dep:fake", "dep:rand", "dep:regex"]
+openapi = ["dep:utoipa"]
+
+[dependencies]
+anyhow = { workspace = true }
+fake = { workspace = true, features = ["derive"], optional = true }
+cargo-autoinherit-test-config = { workspace = true }
+rand = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+sqlx = { workspace = true, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "uuid", "migrate", "chrono"] }
+thiserror = { workspace = true }
+utoipa = { workspace = true, features = ["uuid"], optional = true }
+uuid = { workspace = true, features = ["serde"] }
+validator = { workspace = true, features = ["derive"] }

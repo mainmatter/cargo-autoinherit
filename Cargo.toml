@@ -37,3 +37,12 @@ installers = []
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Publish jobs to run in CI
 pr-run-mode = "plan"
+
+[dev-dependencies]
+git2 = "0.19.0"
+insta = { version = "1.41", features = ["glob"] }
+rand = "0.8.5"
+
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3
