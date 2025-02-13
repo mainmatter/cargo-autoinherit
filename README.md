@@ -92,6 +92,7 @@ cargo autoinherit
 - `cargo-autoinherit` will only merge version requirements that are obviously compatible (e.g. 
   `^1.0.0` and `^1.1.5` will be merged to `^1.1.5`, but `^1.0.0` and `>=1,<2` won't be merged).
 
-
-
-
+# License
+  
+Copyright © 2025- Mainmatter GmbH (https://mainmatter.com), released under the
+[MIT](./LICENSE-MIT) and [Apache](./LICENSE-APACHE) licenses.
