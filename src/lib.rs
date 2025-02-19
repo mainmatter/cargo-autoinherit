@@ -4,20 +4,27 @@ use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest, Workspace}
 use guppy::VersionReq;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Formatter;
+use std::process::ExitCode;
 use toml_edit::{Array, Key};
 
 mod dedup;
 
 #[derive(Debug, Default, Clone, clap::Args)]
+#[command(about, author, version)]
+#[command(group = clap::ArgGroup::new("mode").multiple(false))]
 pub struct AutoInheritConf {
-    #[arg(
-        long,
-        help = "Represents inherited dependencies as `package.workspace = true` if possible."
-    )]
+    /// Represents inherited dependencies as `package.workspace = true` if possible.
+    #[arg(long)]
     pub prefer_simple_dotted: bool,
     /// Package name(s) of workspace member(s) to exclude.
     #[arg(short, long)]
     exclude_members: Vec<String>,
+    /// Run autoinherit in check mode
+    ///
+    /// Instead of automatically fixing non-inherited dependencies, only check that
+    /// none exist, exiting with a non-zero exit code if any are found.
+    #[arg(long, group = "mode")]
+    pub check: bool,
 }
 
 #[derive(Debug, Default)]
@@ -120,7 +127,7 @@ macro_rules! get_either_table_mut {
     };
 }
 
-pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
+pub fn auto_inherit(conf: AutoInheritConf) -> Result<ExitCode, anyhow::Error> {
     let metadata = guppy::MetadataCommand::new().exec().context(
         "Failed to execute `cargo metadata`. Was the command invoked inside a Rust project?",
     )?;
@@ -226,19 +233,26 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
         .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
         .as_table_mut()
         .expect("Failed to find `[workspace.dependencies]` table in root manifest.");
-    let mut was_modified = false;
+    let mut workspace_was_modified = false;
     for (package_name, source) in &package_name2inherited_source {
         if workspace_deps.get(package_name).is_some() {
             continue;
         } else {
-            let mut dep = shared2dep(source);
-            rewrite_dep_path_as_relative(&mut dep, workspace_root);
-
-            insert_preserving_decor(workspace_deps, package_name, dep2toml_item(&dep));
-            was_modified = true;
+            if conf.check {
+                eprintln!("`{package_name}` should be declared as a workspace dependency.");
+            } else {
+                let mut dep = shared2dep(source);
+                rewrite_dep_path_as_relative(&mut dep, workspace_root);
+                insert_preserving_decor(
+                    workspace_deps,
+                    package_name,
+                    dep2toml_item(&shared2dep(source)),
+                );
+            }
+            workspace_was_modified = true;
         }
     }
-    if was_modified {
+    if workspace_was_modified && !conf.check {
         fs_err::write(
             workspace_root.join("Cargo.toml").as_std_path(),
             workspace_toml.to_string(),
@@ -247,6 +261,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
     }
 
     // Inherit new "shared" dependencies in each member's manifest
+    let mut any_member_was_modified = false;
     for member_id in graph.workspace().member_ids() {
         let package = graph.metadata(member_id)?;
         if excluded_members.contains(package.name()) {
@@ -260,7 +275,7 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
         let mut manifest_toml: toml_edit::DocumentMut = manifest_contents
             .parse()
             .context("Failed to parse root manifest")?;
-        let mut was_modified = false;
+        let mut member_was_modified = false;
         if let Some(deps) = &manifest.dependencies {
             let deps_toml = manifest_toml["dependencies"]
                 .as_table_mut()
@@ -269,8 +284,9 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
                 deps,
                 deps_toml,
                 &package_name2inherited_source,
-                &mut was_modified,
+                &mut member_was_modified,
                 conf.prefer_simple_dotted,
+                conf.check,
             );
         }
         if let Some(deps) = &manifest.dev_dependencies {
@@ -281,8 +297,9 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
                 deps,
                 deps_toml,
                 &package_name2inherited_source,
-                &mut was_modified,
+                &mut member_was_modified,
                 conf.prefer_simple_dotted,
+                conf.check,
             );
         }
         if let Some(deps) = &manifest.build_dependencies {
@@ -293,20 +310,28 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
                 deps,
                 deps_toml,
                 &package_name2inherited_source,
-                &mut was_modified,
+                &mut member_was_modified,
                 conf.prefer_simple_dotted,
+                conf.check,
             );
         }
-        if was_modified {
-            fs_err::write(
-                package.manifest_path().as_std_path(),
-                manifest_toml.to_string(),
-            )
-            .context("Failed to write manifest")?;
+        if member_was_modified {
+            any_member_was_modified = true;
+            if !conf.check {
+                fs_err::write(
+                    package.manifest_path().as_std_path(),
+                    manifest_toml.to_string(),
+                )
+                .context("Failed to write manifest")?;
+            }
         }
     }
 
-    Ok(())
+    if conf.check && (workspace_was_modified || any_member_was_modified) {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
 }
 
 enum Action {
@@ -326,6 +351,7 @@ fn inherit_deps(
     package_name2spec: &BTreeMap<String, SharedDependency>,
     was_modified: &mut bool,
     prefer_simple_dotted: bool,
+    check: bool,
 ) {
     for (name, dep) in deps {
         let package_name = dep.package().unwrap_or(name.as_str());
@@ -334,34 +360,53 @@ fn inherit_deps(
         }
         match dep {
             Dependency::Simple(_) => {
-                let mut inherited = toml_edit::InlineTable::new();
-                inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
-                inherited.set_dotted(prefer_simple_dotted);
+                if check {
+                    eprintln!("`{package_name}` should inherit from a workspace dependency.");
+                } else {
+                    let mut inherited = toml_edit::InlineTable::new();
+                    inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
+                    inherited.set_dotted(prefer_simple_dotted);
 
-                insert_preserving_decor(toml_deps, name, toml_edit::Item::Value(inherited.into()));
-                *was_modified = true;
+                    println!("I: {name} = {}", inherited);
+
+                    insert_preserving_decor(
+                        toml_deps,
+                        name,
+                        toml_edit::Item::Value(inherited.into()),
+                    );
+                    *was_modified = true;
+                }
             }
             Dependency::Inherited(_) => {
                 // Nothing to do.
             }
             Dependency::Detailed(details) => {
-                let mut inherited = toml_edit::InlineTable::new();
-                inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
-                if let Some(features) = &details.features {
-                    inherited.insert(
-                        "features",
-                        toml_edit::Value::Array(Array::from_iter(features.iter())),
+                if check {
+                    eprintln!("`{package_name}` should inherit from a workspace dependency.");
+                } else {
+                    let mut inherited = toml_edit::InlineTable::new();
+                    inherited.insert("workspace", toml_edit::value(true).into_value().unwrap());
+                    if let Some(features) = &details.features {
+                        inherited.insert(
+                            "features",
+                            toml_edit::Value::Array(Array::from_iter(features.iter())),
+                        );
+                    }
+                    if let Some(optional) = details.optional {
+                        inherited
+                            .insert("optional", toml_edit::value(optional).into_value().unwrap());
+                    }
+
+                    if inherited.len() == 1 {
+                        inherited.set_dotted(prefer_simple_dotted);
+                    }
+
+                    insert_preserving_decor(
+                        toml_deps,
+                        name,
+                        toml_edit::Item::Value(inherited.into()),
                     );
                 }
-                if let Some(optional) = details.optional {
-                    inherited.insert("optional", toml_edit::value(optional).into_value().unwrap());
-                }
-
-                if inherited.len() == 1 {
-                    inherited.set_dotted(prefer_simple_dotted);
-                }
-
-                insert_preserving_decor(toml_deps, name, toml_edit::Item::Value(inherited.into()));
                 *was_modified = true;
             }
         }

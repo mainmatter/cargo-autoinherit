@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["child"]
+
+[workspace.dependencies]
+rand = "0.8.5"
