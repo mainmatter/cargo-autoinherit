@@ -82,13 +82,23 @@ fn rewrite_dep_paths_as_absolute<'a, P: AsRef<std::path::Path>>(
 fn rewrite_dep_path_as_relative<P: AsRef<std::path::Path>>(dep: &mut Dependency, parent: P) {
     if let Dependency::Detailed(detail) = dep {
         detail.path = detail.path.as_mut().map(|path| {
-            pathdiff::diff_paths(path, parent.as_ref().canonicalize().unwrap())
+            let path = pathdiff::diff_paths(path, parent.as_ref().canonicalize().unwrap())
                 .expect(
                     "Error rewriting dependency path as relative: unable to determine path diff.",
                 )
                 .to_str()
                 .expect("Error rewriting dependency path as relative: path diff is not UTF-8.")
-                .to_string()
+                .to_string();
+
+            #[cfg(windows)]
+            // Because the path is canonicalized, on Windows any / will be replaced by a \ which will cause
+            // compilation failures on Linux builds for cross-platform crates. Rather than avoid canonicalization
+            // or engage in more complicated parsing, it's easier to just replace backslashes. A backslash can
+            // always be a forward slash in cargo crate paths under Windows. Backslashes are also prohibited in
+            // file + folder names, so any backslash in the path is a separator that can be safely replaced.
+            let path = path.replace('\\', "/");
+
+            path
         })
     }
 }
