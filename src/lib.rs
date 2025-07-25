@@ -446,7 +446,7 @@ enum DependencySource {
 impl std::fmt::Display for DependencySource {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            DependencySource::Version(version) => write!(f, "version: {}", version),
+            DependencySource::Version(version) => write!(f, "version: {version}"),
             DependencySource::Git {
                 git,
                 branch,
@@ -454,25 +454,25 @@ impl std::fmt::Display for DependencySource {
                 rev,
                 version,
             } => {
-                write!(f, "git: {}", git)?;
+                write!(f, "git: {git}")?;
                 if let Some(branch) = branch {
-                    write!(f, ", branch: {}", branch)?;
+                    write!(f, ", branch: {branch}")?;
                 }
                 if let Some(tag) = tag {
-                    write!(f, ", tag: {}", tag)?;
+                    write!(f, ", tag: {tag}")?;
                 }
                 if let Some(rev) = rev {
-                    write!(f, ", rev: {}", rev)?;
+                    write!(f, ", rev: {rev}")?;
                 }
                 if let Some(version) = version {
-                    write!(f, ", version: {}", version)?;
+                    write!(f, ", version: {version}")?;
                 }
                 Ok(())
             }
             DependencySource::Path { path, version } => {
-                write!(f, "path: {}", path)?;
+                write!(f, "path: {path}")?;
                 if let Some(version) = version {
-                    write!(f, ", version: {}", version)?;
+                    write!(f, ", version: {version}")?;
                 }
                 Ok(())
             }
