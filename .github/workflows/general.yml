@@ -18,10 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Build tests
-        run: cargo test --no-run
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Run tests
-        run: cargo test
+        run: cargo nextest run --locked
 
   fmt:
     name: Format

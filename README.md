@@ -68,6 +68,8 @@ members = [
 exclude-members = [
     "cargo-autoinherit-test-web" # <= This member will be excluded
 ]
+# Allow dependencies with multiple incompatible sources
+allow-multiple-sources = true
 ```
 
 ## Installation
@@ -84,6 +86,15 @@ cargo install --locked cargo-autoinherit
 ```bash
 # From the root of your workspace
 cargo autoinherit
+
+# To check if all dependencies are properly inherited (fails with non-zero exit code if not)
+cargo autoinherit --check
+
+# To exclude specific workspace members
+cargo autoinherit -e member-name-1 -e member-name-2
+
+# To allow dependencies with multiple incompatible sources
+cargo autoinherit --allow-multiple-sources
 ```
 
 ## Limitations

@@ -24,3 +24,7 @@ pathdiff = "0.2.1"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[dev-dependencies]
+assert_cmd = { features = ["color", "color-auto"], version = "2.0.17" }
+predicates = "3.1.3"
