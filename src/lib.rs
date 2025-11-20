@@ -18,6 +18,9 @@ pub struct AutoInheritConf {
     /// Package name(s) of workspace member(s) to exclude.
     #[arg(short, long)]
     exclude_members: Vec<String>,
+    /// Disables sorting the dependencies in the workspace.dependencies table.
+    #[arg(long)]
+    pub no_sort_workspace_deps: bool,
 }
 
 #[derive(Debug, Default)]
@@ -239,6 +242,10 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
         }
     }
     if was_modified {
+        if !conf.no_sort_workspace_deps {
+            workspace_deps.sort_values();
+        }
+
         fs_err::write(
             workspace_root.join("Cargo.toml").as_std_path(),
             workspace_toml.to_string(),
