@@ -67,9 +67,9 @@ fn rewrite_dep_paths_as_absolute<'a, P: AsRef<std::path::Path>>(
             detail.path = detail.path.as_mut().map(|path| {
                 parent
                     .as_ref()
-                    .join(path)
+                    .join(&path)
                     .canonicalize()
-                    .unwrap()
+                    .unwrap_or_else(|_| panic!("A dependency refers to the path {}, which does not exist.", path.display()))
                     .to_str()
                     .expect("Canonicalized absolute path contained non-UTF-8 segments.")
                     .to_string()
