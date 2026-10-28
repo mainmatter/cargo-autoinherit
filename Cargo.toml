@@ -10,15 +10,15 @@ repository = "https://github.com/mainmatter/cargo-autoinherit"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-anyhow = "1.0.80"
+anyhow = "1.0.104"
 clap = { version = "4", features = ["derive"] }
-guppy = "0.17.5"
-fs-err = "2.11.0"
-cargo-manifest = "0.19.1"
-toml = "0.8.10"
-semver = "1.0.22"
-toml_edit = "0.22.6"
-pathdiff = "0.2.1"
+guppy = "0.19.1"
+fs-err = "3.3.2"
+cargo-manifest = "0.21.0"
+toml = "1.1.8"
+semver = "1.0.28"
+toml_edit = "0.25.17"
+pathdiff = "0.2.3"
 
 # The profile that 'cargo dist' will build with
 [profile.dist]

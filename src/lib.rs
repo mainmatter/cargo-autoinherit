@@ -1,5 +1,5 @@
 use crate::dedup::MinimalVersionSet;
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use cargo_manifest::{Dependency, DependencyDetail, DepsSet, Manifest, Workspace};
 use guppy::VersionReq;
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +18,9 @@ pub struct AutoInheritConf {
     /// Package name(s) of workspace member(s) to exclude.
     #[arg(short, long)]
     exclude_members: Vec<String>,
+    /// Field name to inherit from workspace package table.
+    #[arg(long, value_name = "PACKAGE_FIELD")]
+    pub package_field: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -28,7 +31,7 @@ struct AutoInheritMetadata {
 impl AutoInheritMetadata {
     fn from_workspace(workspace: &Workspace<toml::Table>) -> Result<Self, anyhow::Error> {
         fn error() -> anyhow::Error {
-            anyhow!("Excpected value of `exclude` in `workspace.metadata.cargo-autoinherit` to be an array of strings")
+            anyhow!("Expected value of `exclude` in `workspace.metadata.cargo-autoinherit` to be an array of strings")
         }
 
         let Some(exclude) = workspace
@@ -147,6 +150,31 @@ pub fn auto_inherit(conf: AutoInheritConf) -> Result<(), anyhow::Error> {
             .into_iter()
             .chain(autoinherit_metadata.exclude_members),
     );
+
+    // `--package` is mutually exclusive with dependency inheritance:
+    // it only rewrites `[package]` fields and can work for workspaces that depend on
+    // private registries.
+    if let Some(field) = conf.package_field.as_deref() {
+        for member_id in graph.workspace().member_ids() {
+            let package = graph.metadata(member_id)?;
+            if excluded_members.contains(package.name()) {
+                continue;
+            }
+
+            let manifest_path = package.manifest_path().as_std_path();
+            let contents =
+                fs_err::read_to_string(manifest_path).context("Failed to read member manifest")?;
+            let mut manifest_toml: toml_edit::DocumentMut = contents
+                .parse()
+                .context("Failed to parse member manifest")?;
+
+            if inherit_package_field(&mut manifest_toml, field)? {
+                fs_err::write(manifest_path, manifest_toml.to_string())
+                    .context("Failed to write manifest")?;
+            }
+        }
+        return Ok(());
+    }
 
     let mut package_name2specs: BTreeMap<String, Action> = BTreeMap::new();
     if let Some(deps) = &mut workspace.dependencies {
@@ -318,6 +346,37 @@ impl Default for Action {
     fn default() -> Self {
         Action::TryInherit(MinimalVersionSet::default())
     }
+}
+
+// Rewrites `package.<FIELD>` in a member manifest as a workspace inherited value.
+fn inherit_package_field(
+    manifest_toml: &mut toml_edit::DocumentMut,
+    field: &str,
+) -> Result<bool, anyhow::Error> {
+    let Some(package) = manifest_toml
+        .get_mut("package")
+        .and_then(|t| t.as_table_mut())
+    else {
+        bail!("Failed to find `[package]` table in member manifest.");
+    };
+
+    // Already inherited? Nothing to do.
+    let already_inherited = package
+        .get(field)
+        .and_then(|item| item.as_table())
+        .and_then(|table| table.get("workspace"))
+        .and_then(|workspace| workspace.as_bool())
+        == Some(true);
+    if already_inherited {
+        return Ok(false);
+    }
+
+    let mut inherited = toml_edit::Table::new();
+    inherited.insert("workspace", toml_edit::value(true));
+    inherited.set_dotted(true);
+
+    insert_preserving_decor(package, field, toml_edit::Item::Table(inherited));
+    Ok(true)
 }
 
 fn inherit_deps(
@@ -503,9 +562,9 @@ fn dep2shared_dep(dep: &Dependency) -> SourceType {
             if d.registry.is_some() || d.registry_index.is_some() {
                 return SourceType::MustBeSkipped;
             }
-            if d.path.is_some() {
+            if let Some(path) = d.path.as_ref() {
                 source = Some(DependencySource::Path {
-                    path: d.path.as_ref().unwrap().to_owned(),
+                    path: path.to_owned(),
                     version: d.version.as_ref().map(|v| {
                         VersionReq::parse(v).expect("Failed to parse version requirement")
                     }),
